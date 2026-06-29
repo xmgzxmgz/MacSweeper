@@ -4,6 +4,7 @@ import CryptoKit
 public final class HashService {
     private var cache: [String: String] = [:]
     private let cacheURL: URL
+    private let lock = NSLock()
 
     public init() {
         let support = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support/MacSweeper")
@@ -19,7 +20,7 @@ public final class HashService {
 
         var hasher = SHA256()
         while autoreleasepool(invoking: {
-            let data = try? handle.read(upToCount: 1024 * 1024) // 1MB 分块
+            let data = try? handle.read(upToCount: 1024 * 1024)
             if let data, !data.isEmpty {
                 hasher.update(data: data)
                 return true
@@ -40,18 +41,18 @@ public final class HashService {
         var hasher = SHA256()
 
         // 头部
-        if let head = try? handle.read(upToCount: sampleSize), let head, !head.isEmpty {
+        if let head = try? handle.read(upToCount: sampleSize), !head.isEmpty {
             hasher.update(data: head)
         }
         // 尾部
         if size > Int64(sampleSize) {
             do {
                 try handle.seek(toOffset: UInt64(max(0, size - Int64(sampleSize))))
-                if let tail = try? handle.read(upToCount: sampleSize), let tail, !tail.isEmpty {
+                if let tail = try? handle.read(upToCount: sampleSize), !tail.isEmpty {
                     hasher.update(data: tail)
                 }
             } catch {
-                // 忽略尾部读取失败
+                // 尾部读取失败不影响整体结果
             }
         }
 
@@ -69,6 +70,8 @@ public final class HashService {
     }
 
     private func loadCache() {
+        lock.lock()
+        defer { lock.unlock() }
         guard let data = try? Data(contentsOf: cacheURL) else { return }
         if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
             cache = obj
@@ -76,16 +79,32 @@ public final class HashService {
     }
 
     private func saveCache() {
+        // Caller must hold lock
         guard let data = try? JSONSerialization.data(withJSONObject: cache, options: [.prettyPrinted]) else { return }
         try? data.write(to: cacheURL)
     }
 
-    /// 获取内容哈希（有缓存则命中），可选择快速采样作为预判
+    /// 获取内容哈希（有缓存则命中），可选择快速采样作为预判。线程安全。
     public func contentHash(for url: URL, useFastHash: Bool) -> String? {
         let key = cacheKey(for: url)
-        if let cached = cache[key] { return cached }
-        let hash = useFastHash ? (calculateSampleSHA256(for: url) ?? calculateSHA256(for: url)) : calculateSHA256(for: url)
-        if let hash { cache[key] = hash; saveCache() }
+
+        lock.lock()
+        if let cached = cache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let hash = useFastHash
+            ? (calculateSampleSHA256(for: url) ?? calculateSHA256(for: url))
+            : calculateSHA256(for: url)
+
+        if let hash {
+            lock.lock()
+            cache[key] = hash
+            saveCache()
+            lock.unlock()
+        }
         return hash
     }
 
@@ -94,12 +113,14 @@ public final class HashService {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = max(1, concurrency)
         var result: [URL: String] = [:]
-        let lock = NSLock()
+        let resultLock = NSLock()
         let ops = urls.map { url -> BlockOperation in
             BlockOperation { [weak self] in
                 guard let self else { return }
                 if let h = self.contentHash(for: url, useFastHash: useFastHash) {
-                    lock.lock(); result[url] = h; lock.unlock()
+                    resultLock.lock()
+                    result[url] = h
+                    resultLock.unlock()
                 }
             }
         }

@@ -79,4 +79,4 @@ public struct FilterOptions: Sendable {
     }
 }
 
-extension SuggestionKind: CaseIterable {}
+// SuggestionKind already conforms to CaseIterable in Models.swift

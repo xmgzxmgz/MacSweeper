@@ -23,9 +23,15 @@ public final class ScanHistoryService {
         historyURL = support.appendingPathComponent("scan_history.json")
     }
 
+    private static let maxEntries = 50
+
     public func append(_ entry: ScanHistoryEntry) {
         var list = load()
         list.append(entry)
+        // 保留最近 N 条记录，避免历史文件无限增长
+        if list.count > Self.maxEntries {
+            list = Array(list.suffix(Self.maxEntries))
+        }
         save(list)
     }
 

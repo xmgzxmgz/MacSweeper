@@ -36,8 +36,10 @@ public final class Logger {
         if fm.fileExists(atPath: logURL.path) {
             try fm.copyItem(at: logURL, to: url)
         } else {
-            let empty = "(空日志)\n".data(using: .utf8)!
-            try empty.write(to: url)
+            guard let data = "(空日志)\n".data(using: .utf8) else {
+                throw CocoaError(.fileWriteInapplicableStringEncoding)
+            }
+            try data.write(to: url)
         }
     }
 }

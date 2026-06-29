@@ -1,6 +1,52 @@
-/.history
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
 .build/
-.DS_Store
-*.xcodeproj/xcuserdata/
-dist/
 .swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.history/
+.vscode/
+
+# Distribution
+dist/
+archive/
+*.xcarchive
+
+# Secrets
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+
+# Temporary
+*.tmp
+*.temp
+*.bak

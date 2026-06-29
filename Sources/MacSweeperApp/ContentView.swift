@@ -108,7 +108,6 @@ struct ContentView: View {
             List(selection: Binding(get: { selectedCandidate }, set: { selectedCandidate = $0 })) {
                 ForEach(vm.filteredCandidates, id: \.self) { candidate in
                     CandidateRow(candidate: candidate) { checked in
-                        // 更新选中状态
                         if let idx = vm.deletionCandidates.firstIndex(of: candidate) {
                             vm.deletionCandidates[idx].isMarkedForDeletion = checked
                             vm.applyFiltersAndSort()
@@ -129,6 +128,8 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Summary View
+
 struct SummaryView: View {
     let summary: AnalysisSummary
     var body: some View {
@@ -139,18 +140,9 @@ struct SummaryView: View {
             Text("大文件数：\(summary.largeFilesCount)")
         }
     }
-
-    private func formatBytes(_ bytes: Int64) -> String {
-        let units = ["B", "KB", "MB", "GB", "TB"]
-        var value = Double(bytes)
-        var idx = 0
-        while value >= 1024 && idx < units.count - 1 {
-            value /= 1024
-            idx += 1
-        }
-        return String(format: "%.2f %@", value, units[idx])
-    }
 }
+
+// MARK: - Candidate Row
 
 struct CandidateRow: View {
     let candidate: DeletionCandidate
@@ -171,7 +163,7 @@ struct CandidateRow: View {
                     .font(.callout)
                     .lineLimit(2)
                 HStack(spacing: 6) {
-                    FileIcon(path: candidate.fileItem.url.path)
+                    FileIconView(path: candidate.fileItem.url.path)
                         .frame(width: 16, height: 16)
                     Text(candidate.reason)
                 }
@@ -187,20 +179,20 @@ struct CandidateRow: View {
             .font(.caption)
         }
     }
+}
 
-    private func formatBytes(_ bytes: Int64) -> String {
-        let units = ["B", "KB", "MB", "GB", "TB"]
-        var value = Double(bytes)
-        var idx = 0
-        while value >= 1024 && idx < units.count - 1 {
-            value /= 1024
-            idx += 1
-        }
-        return String(format: "%.2f %@", value, units[idx])
+// MARK: - File Icon (modern macOS compatible)
+
+struct FileIconView: View {
+    let path: String
+    var body: some View {
+        let nsImage = NSWorkspace.shared.icon(forFile: path)
+        Image(nsImage: nsImage).resizable().scaledToFit()
     }
 }
 
-/// 使用 NSOpenPanel 的目录选择视图
+// MARK: - Directory Picker
+
 struct DirectoryPicker: View {
     let onPicked: ([URL]) -> Void
 
@@ -229,6 +221,8 @@ struct DirectoryPicker: View {
     }
 }
 
+// MARK: - Welcome View
+
 struct WelcomeView: View {
     let onQuickScan: () -> Void
     let onOpenPicker: () -> Void
@@ -255,6 +249,8 @@ struct WelcomeView: View {
         .frame(minWidth: 520)
     }
 }
+
+// MARK: - Settings Panel
 
 struct SettingsPanel: View {
     @ObservedObject var vm: MainViewModel
@@ -336,6 +332,8 @@ struct SettingsPanel: View {
     }
 }
 
+// MARK: - Confirm Delete View
+
 struct ConfirmDeleteView: View {
     let count: Int
     let size: Int64
@@ -360,16 +358,7 @@ struct ConfirmDeleteView: View {
     }
 }
 
-struct FileIcon: View {
-    let path: String
-    var body: some View {
-        if let nsimg = NSWorkspace.shared.icon(forFile: path) as NSImage? {
-            Image(nsImage: nsimg).resizable().scaledToFit()
-        } else {
-            Image(systemName: "doc")
-        }
-    }
-}
+// MARK: - Quick Look
 
 #if canImport(Quartz)
 final class OneItemPreviewProvider: NSObject, QLPreviewPanelDataSource {
@@ -396,31 +385,4 @@ private extension ContentView {
         NSWorkspace.shared.open(url)
         #endif
     }
-}
-
-// MARK: - Helpers
-private func parseSizeToBytes(_ s: String) -> Int64? {
-    let lower = s.lowercased().trimmingCharacters(in: .whitespaces)
-    if lower.hasSuffix("kb"), let num = Double(lower.dropLast(2)) { return Int64(num * 1024) }
-    if lower.hasSuffix("mb"), let num = Double(lower.dropLast(2)) { return Int64(num * 1024 * 1024) }
-    if lower.hasSuffix("gb"), let num = Double(lower.dropLast(2)) { return Int64(num * 1024 * 1024 * 1024) }
-    return Int64(lower)
-}
-
-private func formatBytesInput(_ bytes: Int64) -> String {
-    if bytes % (1024*1024*1024) == 0 { return "\(bytes / (1024*1024*1024))GB" }
-    if bytes % (1024*1024) == 0 { return "\(bytes / (1024*1024))MB" }
-    if bytes % 1024 == 0 { return "\(bytes / 1024)KB" }
-    return "\(bytes)"
-}
-
-private func relativeTime(_ date: Date?) -> String {
-    guard let date else { return "无访问记录" }
-    let diff = Int(Date().timeIntervalSince(date))
-    let days = diff / (24*3600)
-    if days >= 1 { return "访问于 \(days) 天前" }
-    let hours = (diff % (24*3600)) / 3600
-    if hours >= 1 { return "访问于 \(hours) 小时前" }
-    let minutes = (diff % 3600) / 60
-    return "访问于 \(minutes) 分钟前"
 }

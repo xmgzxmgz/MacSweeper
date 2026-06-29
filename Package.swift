@@ -17,16 +17,18 @@ let package = Package(
     targets: [
         .target(
             name: "MacSweeperKit",
-            dependencies: []
+            dependencies: [],
+            path: "Sources/MacSweeperKit"
         ),
         .executableTarget(
             name: "MacSweeperCLI",
-            dependencies: ["MacSweeperKit"]
-        )
-        ,
+            dependencies: ["MacSweeperKit"],
+            path: "Sources/MacSweeperCLI"
+        ),
         .executableTarget(
             name: "MacSweeperApp",
-            dependencies: ["MacSweeperKit"]
+            dependencies: ["MacSweeperKit"],
+            path: "Sources/MacSweeperApp"
         )
     ]
 )

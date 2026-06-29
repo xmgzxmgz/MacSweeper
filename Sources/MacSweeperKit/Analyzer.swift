@@ -94,14 +94,5 @@ public final class Analyzer {
         }
     }
 
-    private func formatBytes(_ bytes: Int64) -> String {
-        let units = ["B", "KB", "MB", "GB", "TB"]
-        var value = Double(bytes)
-        var idx = 0
-        while value >= 1024 && idx < units.count - 1 {
-            value /= 1024
-            idx += 1
-        }
-        return String(format: "%.2f %@", value, units[idx])
-    }
+    // formatBytes is defined in Utilities.swift
 }

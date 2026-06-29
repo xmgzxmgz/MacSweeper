@@ -1,12 +1,12 @@
 import Foundation
 import Combine
 
-/// 预留给 SwiftUI 应用使用的 ViewModel（CLI 不直接用）
+/// SwiftUI 应用与 CLI 共用的 ViewModel
 public final class MainViewModel: ObservableObject {
     @Published public var scanProgress: Double = 0
     @Published public var currentStatus: String = ""
     @Published public var isScanning: Bool = false
-    @Published public var analysisSummary: AnalysisSummary = .init(totalFilesScanned: 0, totalSizeCleanable: 0, duplicateCount: 0, largeFilesCount: 0, oldFilesCount: 0, cacheLogCount: 0, cloudPlaceholderCount: 0)
+    @Published public var analysisSummary: AnalysisSummary = .empty
     @Published public var deletionCandidates: [DeletionCandidate] = []
     @Published public var filteredCandidates: [DeletionCandidate] = []
 
@@ -23,60 +23,96 @@ public final class MainViewModel: ObservableObject {
 
     public init() {}
 
+    /// 在后台线程执行扫描，结果自动回调主线程更新 UI
     public func startAnalysis(paths: [URL], largeThresholdBytes: Int64? = nil, oldDays: Int? = nil, includeDuplicates: Bool? = nil) {
         isScanning = true
         currentStatus = "开始扫描..."
         deletionCandidates.removeAll()
         filteredCandidates.removeAll()
         isCancelled = false
+        scanProgress = 0
         Logger.shared.setEnabled(settings.enableLogging)
-        Logger.shared.log(.info, "开始扫描：\(paths.map{ $0.path }.joined(separator: ", "))")
-        lastScanStart = Date()
+        Logger.shared.log(.info, "开始扫描：\(paths.map { $0.path }.joined(separator: ", "))")
 
-        var allItems: [FileItem] = []
-        for (idx, url) in paths.enumerated() {
-            currentStatus = "扫描：\(url.path)"
-            if isCancelled { break }
-            let items = fmService.scanDirectory(at: url)
-            allItems.append(contentsOf: items)
-            scanProgress = Double(idx + 1) / Double(paths.count)
-        }
+        let capturedSettings = settings
 
-        var candidates: [DeletionCandidate] = []
-        let thBytes = largeThresholdBytes ?? settings.largeThresholdBytes
-        let days = oldDays ?? settings.oldDays
-        let dup = includeDuplicates ?? settings.includeDuplicates
+        Task.detached { [weak self] in
+            guard let self else { return }
 
-        // 预过滤：排除路径与扩展名
-        let prefiltered = allItems.filter { item in
-            let path = item.url.path
-            if settings.excludePaths.contains(where: { path.hasPrefix($0) }) { return false }
-            if let ext = item.url.pathExtension.lowercased(), !ext.isEmpty {
-                if settings.excludeExtensions.contains(ext) { return false }
+            let scanStart = Date()
+            var allItems: [FileItem] = []
+
+            for (idx, url) in paths.enumerated() {
+                await self.updateProgress(Double(idx) / Double(paths.count), status: "扫描：\(url.path)")
+                let cancelled = await MainActor.run { self.isCancelled }
+                if cancelled { break }
+                let items = self.fmService.scanDirectory(at: url)
+                allItems.append(contentsOf: items)
             }
-            return true
-        }
 
-        candidates += analyzer.identifyLargeFiles(items: prefiltered, thresholdBytes: thBytes)
-        candidates += analyzer.identifyOldFiles(items: prefiltered, olderThanDays: days)
-        if dup {
-            lastDuplicateStart = Date()
-            candidates += analyzer.identifyDuplicates(items: prefiltered, concurrency: settings.hashConcurrency, useFastHash: settings.useFastHash)
-        }
-        candidates += analyzer.identifyCacheAndLogs(items: prefiltered)
-        candidates += analyzer.identifyCloudPlaceholders(items: prefiltered)
-        candidates = analyzer.applyProtections(candidates: candidates)
+            let thBytes = largeThresholdBytes ?? capturedSettings.largeThresholdBytes
+            let days = oldDays ?? capturedSettings.oldDays
+            let dup = includeDuplicates ?? capturedSettings.includeDuplicates
 
-        deletionCandidates = candidates
-        analysisSummary = analyzer.summarize(candidates: candidates, totalScanned: allItems.count)
-        applyFiltersAndSort()
-        let scanDuration = Date().timeIntervalSince(lastScanStart)
-        let dupDuration = dup ? Date().timeIntervalSince(lastDuplicateStart) : 0
-        historyService.append(.init(date: Date(), totalFilesScanned: allItems.count, totalSizeCleanable: analysisSummary.totalSizeCleanable, duplicateCount: analysisSummary.duplicateCount, largeFilesCount: analysisSummary.largeFilesCount, oldFilesCount: analysisSummary.oldFilesCount, cacheLogCount: analysisSummary.cacheLogCount, cloudPlaceholderCount: analysisSummary.cloudPlaceholderCount, scanDurationSeconds: scanDuration, duplicateAnalysisSeconds: dupDuration))
-        Logger.shared.log(.info, "扫描完成，耗时：\(String(format: "%.2f", scanDuration))s；查重耗时：\(String(format: "%.2f", dupDuration))s")
-        currentStatus = "扫描完成"
-        isScanning = false
-        scanProgress = 1
+            // 预过滤：排除路径与扩展名
+            let prefiltered = allItems.filter { item in
+                let path = item.url.path
+                if capturedSettings.excludePaths.contains(where: { path.hasPrefix($0) }) { return false }
+                let ext = item.url.pathExtension.lowercased()
+                if !ext.isEmpty && capturedSettings.excludeExtensions.contains(ext) { return false }
+                return true
+            }
+
+            var candidates: [DeletionCandidate] = []
+            candidates += self.analyzer.identifyLargeFiles(items: prefiltered, thresholdBytes: thBytes)
+            candidates += self.analyzer.identifyOldFiles(items: prefiltered, olderThanDays: days)
+            var dupStart: Date = .distantPast
+            if dup {
+                dupStart = Date()
+                candidates += self.analyzer.identifyDuplicates(items: prefiltered, concurrency: capturedSettings.hashConcurrency, useFastHash: capturedSettings.useFastHash)
+            }
+            candidates += self.analyzer.identifyCacheAndLogs(items: prefiltered)
+            candidates += self.analyzer.identifyCloudPlaceholders(items: prefiltered)
+            candidates = self.analyzer.applyProtections(candidates: candidates)
+
+            let scanDuration = Date().timeIntervalSince(scanStart)
+            let dupDuration = dup ? Date().timeIntervalSince(dupStart) : 0
+            let summary = self.analyzer.summarize(candidates: candidates, totalScanned: allItems.count)
+
+            // 记录扫描历史（限制保留最近 50 条）
+            self.historyService.append(.init(
+                date: Date(),
+                totalFilesScanned: allItems.count,
+                totalSizeCleanable: summary.totalSizeCleanable,
+                duplicateCount: summary.duplicateCount,
+                largeFilesCount: summary.largeFilesCount,
+                oldFilesCount: summary.oldFilesCount,
+                cacheLogCount: summary.cacheLogCount,
+                cloudPlaceholderCount: summary.cloudPlaceholderCount,
+                scanDurationSeconds: scanDuration,
+                duplicateAnalysisSeconds: dupDuration
+            ))
+
+            Logger.shared.log(.info, "扫描完成，耗时：\(String(format: "%.2f", scanDuration))s；查重耗时：\(String(format: "%.2f", dupDuration))s")
+
+            let finalCandidates = candidates
+            let finalSummary = summary
+
+            await MainActor.run {
+                self.deletionCandidates = finalCandidates
+                self.analysisSummary = finalSummary
+                self.applyFiltersAndSort()
+                self.currentStatus = "扫描完成"
+                self.isScanning = false
+                self.scanProgress = 1
+            }
+        }
+    }
+
+    @MainActor
+    private func updateProgress(_ progress: Double, status: String) {
+        scanProgress = progress
+        currentStatus = status
     }
 
     public func applyFiltersAndSort() {
@@ -125,7 +161,6 @@ public final class MainViewModel: ObservableObject {
         case .byLowRisk:
             let score: (DeletionCandidate) -> Int = { cand in
                 if let r = cand.riskLevel { return r.rawValue }
-                // 回退：按类别推断
                 switch cand.kind {
                 case .cacheLog?: return RiskLevel.low.rawValue
                 case .duplicate?: return RiskLevel.low.rawValue
@@ -159,7 +194,6 @@ public final class MainViewModel: ObservableObject {
         for candidate in selected {
             _ = fmService.safeDelete(fileItem: candidate.fileItem)
         }
-        // 更新摘要与过滤视图
         analysisSummary = analyzer.summarize(candidates: deletionCandidates.filter { !$0.isMarkedForDeletion }, totalScanned: analysisSummary.totalFilesScanned)
         applyFiltersAndSort()
     }
@@ -171,7 +205,6 @@ public final class MainViewModel: ObservableObject {
         let groups = Dictionary(grouping: dups, by: { $0.contentHash ?? "size:\($0.fileItem.size)" })
         for (_, group) in groups {
             guard !group.isEmpty else { continue }
-            // 选择保留项
             let keep: DeletionCandidate?
             switch policy {
             case .keepNewest:
@@ -181,7 +214,6 @@ public final class MainViewModel: ObservableObject {
             case .keepShortestPath:
                 keep = group.min(by: { $0.fileItem.url.path.count < $1.fileItem.url.path.count })
             }
-            // 其余标记为删除
             for idx in deletionCandidates.indices {
                 let cand = deletionCandidates[idx]
                 if group.contains(cand) {
@@ -196,7 +228,7 @@ public final class MainViewModel: ObservableObject {
         scanProgress = 0
         currentStatus = ""
         isScanning = false
-        analysisSummary = .init(totalFilesScanned: 0, totalSizeCleanable: 0, duplicateCount: 0, largeFilesCount: 0, oldFilesCount: 0, cacheLogCount: 0, cloudPlaceholderCount: 0)
+        analysisSummary = .empty
         deletionCandidates.removeAll()
         filteredCandidates.removeAll()
     }
@@ -207,15 +239,15 @@ public final class MainViewModel: ObservableObject {
         settings.preset = preset
         switch preset {
         case .light:
-            settings.largeThresholdBytes = 2_000_000_000 // 2GB
+            settings.largeThresholdBytes = 2_000_000_000
             settings.oldDays = 365
             settings.includeDuplicates = false
         case .standard:
-            settings.largeThresholdBytes = 1_000_000_000 // 1GB
+            settings.largeThresholdBytes = 1_000_000_000
             settings.oldDays = 365
             settings.includeDuplicates = true
         case .deep:
-            settings.largeThresholdBytes = 500_000_000 // 500MB
+            settings.largeThresholdBytes = 500_000_000
             settings.oldDays = 180
             settings.includeDuplicates = true
         }
@@ -231,7 +263,7 @@ public final class MainViewModel: ObservableObject {
 
     public func exportJSON(to url: URL) throws {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(filteredCandidates.map { [
             "path": $0.fileItem.url.path,
             "size": "\($0.fileItem.size)",
@@ -247,7 +279,9 @@ public final class MainViewModel: ObservableObject {
             let path = cand.fileItem.url.path.replacingOccurrences(of: ",", with: " ")
             return "\(path),\(cand.fileItem.size),\(cand.reason),\(cand.kind?.rawValue ?? "")"
         }.joined(separator: "\n")
-        let data = (header + rows).data(using: .utf8)!
+        guard let data = (header + rows).data(using: .utf8) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         try data.write(to: url)
     }
 

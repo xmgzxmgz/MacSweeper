@@ -70,6 +70,8 @@ public struct AnalysisSummary: Sendable {
     public let cacheLogCount: Int
     public let cloudPlaceholderCount: Int
 
+    public static let empty = AnalysisSummary(totalFilesScanned: 0, totalSizeCleanable: 0, duplicateCount: 0, largeFilesCount: 0, oldFilesCount: 0, cacheLogCount: 0, cloudPlaceholderCount: 0)
+
     public init(totalFilesScanned: Int, totalSizeCleanable: Int64, duplicateCount: Int, largeFilesCount: Int, oldFilesCount: Int, cacheLogCount: Int, cloudPlaceholderCount: Int = 0) {
         self.totalFilesScanned = totalFilesScanned
         self.totalSizeCleanable = totalSizeCleanable

@@ -20,13 +20,12 @@ public final class FileManagerService {
             .totalFileAllocatedSizeKey,
             .fileSizeKey,
             .isUbiquitousItemKey,
-            .ubiquitousItemIsDownloadedKey,
-            .volumeIsExternalKey,
+            .ubiquitousItemDownloadingStatusKey,
             .volumeIsRemovableKey,
             .volumeURLKey
         ]
 
-        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { (url, error) -> Bool in
+        guard let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { (errorURL, error) -> Bool in
             // 跳过无法访问的路径
             return true
         }) else {
@@ -41,12 +40,25 @@ public final class FileManagerService {
                 let size = (values.totalFileAllocatedSize ?? values.fileSize).map { Int64($0) } ?? 0
                 let accessDate = values.contentAccessDate
                 let isUbiquitous = values.isUbiquitousItem ?? false
-                let isDownloaded = values.ubiquitousItemIsDownloaded ?? true
-                let isExternal = (values.volumeIsExternal ?? false) || (values.volumeIsRemovable ?? false)
+                // ubiquitousItemDownloadingStatus == .current means already downloaded
+                let isDownloaded: Bool = {
+                    guard let status = values.ubiquitousItemDownloadingStatus else { return true }
+                    return status != .notDownloaded
+                }()
+                // Use volumeIsRemovable as a proxy for external volumes (volumeIsExternal requires macOS 13+)
+                let isExternal = values.volumeIsRemovable ?? false
 
                 // 仅记录文件（不记录目录）
                 if isFile {
-                    items.append(FileItem(url: fileURL, size: size, lastAccessDate: accessDate, isDirectory: isDir, isUbiquitousItem: isUbiquitous, isUbiquitousItemDownloaded: isDownloaded, isOnExternalVolume: isExternal))
+                    items.append(FileItem(
+                        url: fileURL,
+                        size: size,
+                        lastAccessDate: accessDate,
+                        isDirectory: isDir,
+                        isUbiquitousItem: isUbiquitous,
+                        isUbiquitousItemDownloaded: isDownloaded,
+                        isOnExternalVolume: isExternal
+                    ))
                 }
             } catch {
                 // 忽略单个文件的错误，继续扫描
@@ -64,6 +76,7 @@ public final class FileManagerService {
             try fm.trashItem(at: fileItem.url, resultingItemURL: &resultingURL)
             return true
         } catch {
+            Logger.shared.log(.error, "删除失败: \(fileItem.url.path) - \(error.localizedDescription)")
             return false
         }
     }
