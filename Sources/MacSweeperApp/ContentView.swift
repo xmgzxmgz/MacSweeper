@@ -1,7 +1,9 @@
 import SwiftUI
 import AppKit
 import MacSweeperKit
+#if canImport(Quartz)
 import Quartz
+#endif
 
 struct ContentView: View {
     @EnvironmentObject var vm: MainViewModel
@@ -324,7 +326,13 @@ struct SettingsPanel: View {
     }
 
     private func labelFor(_ k: SuggestionKind) -> String {
-        switch k { case .large: return "大文件"; case .old: return "旧文件"; case .duplicate: return "重复"; case .cacheLog: return "缓存/日志" }
+        switch k {
+        case .large: return "大文件"
+        case .old: return "旧文件"
+        case .duplicate: return "重复"
+        case .cacheLog: return "缓存/日志"
+        case .cloudPlaceholder: return "云占位"
+        }
     }
 }
 
@@ -363,6 +371,7 @@ struct FileIcon: View {
     }
 }
 
+#if canImport(Quartz)
 final class OneItemPreviewProvider: NSObject, QLPreviewPanelDataSource {
     var itemURL: URL?
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { itemURL == nil ? 0 : 1 }
@@ -370,10 +379,12 @@ final class OneItemPreviewProvider: NSObject, QLPreviewPanelDataSource {
         return itemURL as NSURL?
     }
 }
+#endif
 
 private extension ContentView {
     func showQuickLook() {
         guard let url = selectedCandidate?.fileItem.url else { return }
+        #if canImport(Quartz)
         previewProvider.itemURL = url
         if let panel = QLPreviewPanel.shared() {
             panel.dataSource = previewProvider
@@ -381,6 +392,9 @@ private extension ContentView {
         } else {
             NSWorkspace.shared.open(url)
         }
+        #else
+        NSWorkspace.shared.open(url)
+        #endif
     }
 }
 

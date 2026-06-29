@@ -28,7 +28,7 @@ public struct FileItem: Hashable, Sendable {
     }
 }
 
-public enum SuggestionKind: String, Sendable, Hashable {
+public enum SuggestionKind: String, Sendable, Hashable, CaseIterable {
     case large
     case old
     case duplicate

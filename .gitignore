@@ -1,1 +1,6 @@
 /.history
+.build/
+.DS_Store
+*.xcodeproj/xcuserdata/
+dist/
+.swiftpm/

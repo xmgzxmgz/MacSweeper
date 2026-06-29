@@ -234,7 +234,7 @@ public final class MainViewModel: ObservableObject {
         encoder.outputFormatting = [.prettyPrinted]
         let data = try encoder.encode(filteredCandidates.map { [
             "path": $0.fileItem.url.path,
-            "size": $0.fileItem.size,
+            "size": "\($0.fileItem.size)",
             "reason": $0.reason,
             "kind": $0.kind?.rawValue ?? ""
         ] })
