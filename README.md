@@ -2,6 +2,8 @@
 
 # Mac 清风 (MacSweeper)
 
+[![CI](https://github.com/xmgzxmgz/MacSweeper/actions/workflows/ci.yml/badge.svg)](https://github.com/xmgzxmgz/MacSweeper/actions/workflows/ci.yml)
+
 **智能 Mac 文件清理工具 -- 分析磁盘，给出安全删除建议**
 
 [![Swift](https://img.shields.io/badge/Swift-5.7+-orange?style=flat-square&logo=swift)](https://swift.org/)
