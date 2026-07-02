@@ -247,7 +247,7 @@ MIT License - 详见 [LICENSE](LICENSE)
 ## 作者
 
 **xmgz**
-- Email: [xmgzdm@gmail.com](mailto:xmgzdm@gmail.com)
+- Email: 通过 GitHub Issues 联系
 - GitHub: [@xmgzxmgz](https://github.com/xmgzxmgz)
 
 ---
